@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Forest Patrol - Ultimate Survival</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #0b1a0e;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            border: 4px solid #142d18;
+            background-color: #122216;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.8);
+            display: none;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(11, 26, 14, 0.93);
+            padding: 16px 22px;
+            border-radius: 8px;
+            border-left: 5px solid #d4af37;
+            font-size: 13px;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+            pointer-events: none;
+            line-height: 1.6;
+            min-width: 240px;
+            display: none;
+        }
+        .bar-container {
+            width: 100%;
+            background: #222;
+            height: 12px;
+            border-radius: 4px;
+            margin-top: 5px;
+            border: 1px solid #444;
+            overflow: hidden;
+        }
+        #hp-bar { width: 100%; background: linear-gradient(90deg, #ff3333, #ff6666); height: 100%; }
+        #v-hp-container { display: none; }
+        #v-hp-bar { width: 100%; background: linear-gradient(90deg, #33aaff, #66ccff); height: 100%; }
+       
+        /* Telas de Menu/Estado */
+        .screen {
+            position: absolute;
+            background: rgba(10, 25, 12, 0.95);
+            border: 3px solid #d4af37;
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            max-width: 450px;
+        }
+        .screen h1 { color: #d4af37; margin-top: 0; font-size: 28px; }
+        .screen p { font-size: 14px; line-height: 1.6; color: #ccc; }
+        .screen button {
+            background: #142d18;
+            color: #d4af37;
+            border: 2px solid #d4af37;
+            padding: 12px 28px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .screen button:hover { background: #d4af37; color: #102413; }
+        #game-over-screen, #victory-screen { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="start-screen" class="screen">
+    <h1>PATRULHA DA FLORESTA</h1>
+    <p>Encontre os veículos camuflados pela floresta densa. Os javalis vão caçar você a pé ou dentro dos veículos. Use os carros para neutralizá-los deslizando ou use o lançador d'água.</p>
+    <p><strong>Missão:</strong> Limpar a área em menos de 5 minutos!</p>
+    <button onclick="startGame()">INICIAR PATRULHA</button>
+</div>
+
+<div id="game-over-screen" class="screen">
+    <h1 style="color: #ff3333;">FIM DE JOGO</h1>
+    <p id="game-over-reason">Sua integridade foi totalmente comprometida pelas forças da natureza.</p>
+    <button onclick="restartGame()">TENTAR NOVAMENTE</button>
+</div>
+
+<div id="victory-screen" class="screen">
+    <h1 style="color: #44ff44;">MISSÃO CUMPRIDA</h1>
+    <p>Todos os javalis da região foram contidos e a floresta está segura temporariamente.</p>
+    <button onclick="restartGame()">JOGAR DE NOVO</button>
+</div>
+
+<div id="hud">
+    <strong>SISTEMA DE PATRULHA</strong><br>
+    Tempo Restante: <b id="timer-display" style="color: #ffcc00;">05:00</b><br>
+    Alvos Restantes: <b id="alvos-display">0</b><br>
+    Controles: <b>W/A/S/D</b> | Entrar/Sair: <b>F</b>
+   
+    <div class="bar-container">
+        <div id="hp-bar"></div>
+    </div>
+    <span style="font-size: 10px; color: #aaa;">INTEGRIDADE DO AGENTE</span>
+
+    <div id="v-hp-container">
+        <div class="bar-container">
+            <div id="v-hp-bar"></div>
+        </div>
+        <span style="font-size: 10px; color: #66ccff;">RESISTÊNCIA DO VEÍCULO</span>
+    </div>
+</div>
+
+<canvas id="gameCanvas" width="1024" height="768"></canvas>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const TILE_SIZE = 64;
+
+// Mapa Expandido Avançado (36x36) com labirintos e clareiras amplas
+const MAP_GRID = [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,1,1,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,1,1,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,0,0,0,1,1,1,1,1,0,0,0,0,0,1,1,0,0,0,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,1,1,0,0,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1],
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1],
+    [1,0,0,0,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,1,1,1,1,0,0,0,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,1],
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,1],
+    [1,0,0,0,0,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,0,0,0,0,0,0,1],
+    [1,0,0,0,0,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,1,1,1,1,0,0,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,1],
+    [1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,1],
+    [1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+
+const keys = {};
+window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+class TileMap {
+    constructor(grid) {
+        this.grid = grid;
+        this.rows = grid.length;
+        this.cols = grid[0].length;
+        this.grassDetails = [];
+        for (let i = 0; i < 200; i++) {
+            this.grassDetails.push({
+                x: Math.random() * (this.cols * TILE_SIZE),
+                y: Math.random() * (this.rows * TILE_SIZE),
+                size: 3 + Math.random() * 5
+            });
+        }
+    }
+    isSolid(x, y) {
+        const tileX = Math.floor(x / TILE_SIZE);
+        const tileY = Math.floor(y / TILE_SIZE);
+        if (tileX >= 0 && tileX < this.cols && tileY >= 0 && tileY < this.rows) {
+            return this.grid[tileY][tileX] === 1;
+        }
+        return true;
+    }
+    draw(ctx, camera) {
+        ctx.fillStyle = "#1e3525";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        this.grassDetails.forEach(g => {
+            const sx = g.x - camera.x;
+            const sy = g.y - camera.y;
+            if (sx > -20 && sx < canvas.width + 20 && sy > -20 && sy < canvas.height + 20) {
+                ctx.fillRect(sx, sy, g.size, g.size);
+            }
+        });
+
+        for (let y = 0; y < this.rows; y++) {
+            for (let x = 0; x < this.cols; x++) {
+                const screenX = x * TILE_SIZE - camera.x;
+                const screenY = y * TILE_SIZE - camera.y;
+                if (screenX < -TILE_SIZE || screenX > canvas.width || screenY < -TILE_SIZE || screenY > canvas.height) continue;
+
+                if (this.grid[y][x] === 1) {
+                    ctx.fillStyle = "rgba(5, 15, 8, 0.4)";
+                    ctx.beginPath(); ctx.arc(screenX + TILE_SIZE/2 + 6, screenY + TILE_SIZE/2 + 6, TILE_SIZE/2, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = "#112615";
+                    ctx.beginPath(); ctx.arc(screenX + TILE_SIZE/2, screenY + TILE_SIZE/2, TILE_SIZE/2, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = "#18361e";
+                    ctx.beginPath(); ctx.arc(screenX + TILE_SIZE/2 - 3, screenY + TILE_SIZE/2 - 3, TILE_SIZE/3, 0, Math.PI*2); ctx.fill();
+                }
+            }
+        }
+    }
+}
+
+const waterParticles = [];
+class WaterParticle {
+    constructor(x, y, angle) {
+        this.x = x; this.y = y;
+        const spread = (Math.random() - 0.5) * 0.2;
+        const speed = 11;
+        this.vx = Math.cos(angle + spread) * speed;
+        this.vy = Math.sin(angle + spread) * speed;
+        this.life = 26;
+    }
+    update(tileMap) {
+        this.life--; this.x += this.vx; this.y += this.vy;
+        if (tileMap.isSolid(this.x, this.y)) this.life = 0;
+    }
+    draw(ctx, camera) {
+        ctx.fillStyle = `rgba(0, 190, 255, ${this.life / 26})`;
+        ctx.beginPath(); ctx.arc(this.x - camera.x, this.y - camera.y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+class Javali {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.vx = 0; this.vy = 0;
+        this.angle = Math.random() * Math.PI * 2;
+        this.baseSpeed = 1.7 + Math.random() * 0.7;
+        this.radius = 18;
+        this.actionTimer = 0;
+        this.slipped = false;
+        this.fovRadius = 320; // Campo de visão aumentado
+        this.isChasing = false;
+    }
+
+    update(tileMap, targetPos) {
+        if (this.slipped) {
+            this.vx *= 0.94; this.vy *= 0.94;
+            this.angle += (this.vx + this.vy) * 0.02;
+            if (!tileMap.isSolid(this.x + this.vx, this.y)) this.x += this.vx;
+            if (!tileMap.isSolid(this.x, this.y + this.vy)) this.y += this.vy;
+            return;
+        }
+
+        const dist = Math.hypot(targetPos.x - this.x, targetPos.y - this.y);
+
+        // Vê o jogador mesmo dentro do veículo
+        if (dist < this.fovRadius) {
+            this.isChasing = true;
+            this.angle = Math.atan2(targetPos.y - this.y, targetPos.x - this.x);
+            this.vx = Math.cos(this.angle) * this.baseSpeed;
+            this.vy = Math.sin(this.angle) * this.baseSpeed;
+        } else {
+            this.isChasing = false;
+            this.actionTimer--;
+            if (this.actionTimer <= 0) {
+                this.angle = Math.random() * Math.PI * 2;
+                this.actionTimer = 70 + Math.random() * 60;
+            }
+            this.vx = Math.cos(this.angle) * (this.baseSpeed * 0.4);
+            this.vy = Math.sin(this.angle) * (this.baseSpeed * 0.4);
+        }
+
+        if (!tileMap.isSolid(this.x + this.vx, this.y)) this.x += this.vx;
+        if (!tileMap.isSolid(this.x, this.y + this.vy)) this.y += this.vy;
+    }
+
+    slipAndSlide(forceX, forceY) {
+        if (!this.slipped) this.slipped = true;
+        this.vx += forceX; this.vy += forceY;
+    }
+
+    draw(ctx, camera) {
+        const screenX = this.x - camera.x; const screenY = this.y - camera.y;
+        if (screenX < -50 || screenX > canvas.width + 50 || screenY < -50 || screenY > canvas.height + 50) return;
+
+        ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(this.angle);
+
+        if (this.slipped) {
+            ctx.fillStyle = "rgba(0, 140, 255, 0.4)";
+            ctx.beginPath(); ctx.arc(0, 0, this.radius + 12, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "#3a2e25"; ctx.fillRect(-18, -12, 36, 24);
+        } else {
+            ctx.fillStyle = "rgba(0,0,0,0.3)";
+            ctx.beginPath(); ctx.arc(2, 4, this.radius, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "#524134";
+            ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#2b2018"; ctx.fillRect(-14, -6, 20, 12);
+            ctx.fillStyle = "#3d2f25";
+            ctx.beginPath(); ctx.moveTo(10, -10); ctx.lineTo(24, -4); ctx.lineTo(24, 4); ctx.lineTo(10, 10); ctx.fill();
+            ctx.fillStyle = "#ffffff"; ctx.fillRect(20, -11, 3, 4); ctx.fillRect(20, 7, 3, 4);
+            ctx.fillStyle = this.isChasing ? "#ff0000" : "#e6a100";
+            ctx.beginPath(); ctx.arc(14, -5, 2.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(14, 5, 2.5, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+class Player {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.angle = 0.0; this.speed = 0.0;
+        this.radius = 15; this.accel = 0.24; this.decelFriction = 0.84;
+        this.maxSpeed = 4.4; this.turnSpeed = 0.075; this.isActive = true;
+        this.health = 100;
+    }
+
+    update(tileMap) {
+        if (!this.isActive) return;
+
+        if (keys['a'] || keys['arrowleft']) this.angle -= this.turnSpeed;
+        if (keys['d'] || keys['arrowright']) this.angle += this.turnSpeed;
+
+        let moved = false;
+        if (keys['w'] || keys['arrowup']) { this.speed += this.accel; if (this.speed > this.maxSpeed) this.speed = this.maxSpeed; moved = true; }
+        else if (keys['s'] || keys['arrowdown']) { this.speed -= this.accel; if (this.speed < -this.maxSpeed / 2) this.speed = -this.maxSpeed / 2; moved = true; }
+
+        if (!moved) { this.speed *= this.decelFriction; if (Math.abs(this.speed) < 0.05) this.speed = 0; }
+
+        const dx = Math.cos(this.angle) * this.speed; const dy = Math.sin(this.angle) * this.speed;
+        if (!tileMap.isSolid(this.x + dx, this.y)) this.x += dx;
+        if (!tileMap.isSolid(this.x, this.y + dy)) this.y += dy;
+
+        if (keys['e']) {
+            waterParticles.push(new WaterParticle(this.x + Math.cos(this.angle)*22, this.y + Math.sin(this.angle)*22, this.angle));
+        }
+    }
+
+    draw(ctx, camera) {
+        if (!this.isActive) return;
+        const screenX = this.x - camera.x; const screenY = this.y - camera.y;
+        ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(this.angle);
+        ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.arc(2, 3, this.radius, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#334455"; ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#223344"; ctx.fillRect(2, -12, 10, 6); ctx.fillRect(2, 6, 10, 6);
+        ctx.fillStyle = "#161616"; ctx.fillRect(10, -3, 15, 6);
+        ctx.fillStyle = "#00bbff"; ctx.fillRect(25, -2, 3, 4);
+        ctx.restore();
+    }
+}
+
+class Vehicle {
+    constructor(x, y, type) {
+        this.x = x; this.y = y; this.vx = 0.0; this.vy = 0.0; this.angle = Math.random() * Math.PI;
+        this.type = type; this.driver = null;
+        this.health = 100;
+
+        if (type === "police") { this.width = 46; this.length = 84; this.maxSpeed = 12.5; this.enginePower = 0.32; this.color = "#151518"; }
+        else if (type === "van") { this.width = 54; this.length = 98; this.maxSpeed = 9.5; this.enginePower = 0.24; this.color = "#d9d9d9"; }
+        else if (type === "moto") { this.width = 24; this.length = 56; this.maxSpeed = 14.5; this.enginePower = 0.42; this.color = "#111"; }
+        this.drag = 0.98;
+    }
+
+    update(tileMap) {
+        if (!this.driver) {
+            this.vx *= this.drag; this.vy *= this.drag;
+            this.moveAndCollide(tileMap); return;
+        }
+
+        const fx = Math.cos(this.angle); const fy = Math.sin(this.angle);
+        let vForward = this.vx * fx + this.vy * fy;
+
+        if (keys['a'] || keys['arrowleft']) this.angle -= (this.type === "moto" ? 0.085 : 0.05);
+        if (keys['d'] || keys['arrowright']) this.angle += (this.type === "moto" ? 0.085 : 0.05);
+
+        if (keys['w'] || keys['arrowup']) vForward += this.enginePower;
+        else if (keys['s'] || keys['arrowdown']) vForward -= 0.35;
+
+        vForward *= this.drag;
+        if (vForward > this.maxSpeed) vForward = this.maxSpeed;
+        if (vForward < -this.maxSpeed/2) vForward = -this.maxSpeed/2;
+
+        this.vx = fx * vForward; this.vy = fy * vForward;
+        this.moveAndCollide(tileMap);
+    }
+
+    moveAndCollide(tileMap) {
+        this.x += this.vx; if (tileMap.isSolid(this.x, this.y)) { this.x -= this.vx; this.vx *= -0.3; }
+        this.y += this.vy; if (tileMap.isSolid(this.x, this.y)) { this.y -= this.vy; this.vy *= -0.3; }
+    }
+
+    draw(ctx, camera) {
+        const screenX = this.x - camera.x; const screenY = this.y - camera.y;
+        if (screenX < -100 || screenX > canvas.width + 100 || screenY < -100 || screenY > canvas.height + 100) return;
+       
+        ctx.save(); ctx.translate(screenX, screenY); ctx.rotate(this.angle + Math.PI / 2);
+        ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(-this.width/2 + 4, -this.length/2 + 4, this.width, this.length);
+        ctx.fillStyle = this.color; ctx.fillRect(-this.width / 2, -this.length / 2, this.width, this.length);
+
+        if (this.type === "police" || this.type === "van") {
+            ctx.fillStyle = "rgba(100, 180, 240, 0.6)";
+            ctx.fillRect(-this.width/2 + 4, -this.length/4, this.width - 8, 12);
+        }
+        if (this.type === "police") {
+            ctx.fillStyle = "#ffffff"; ctx.fillRect(-this.width/2, -12, 4, 24); ctx.fillRect(this.width/2 - 4, -12, 4, 24);
+        }
+        ctx.restore();
+    }
+}
+
+class Camera {
+    constructor() { this.x = 0; this.y = 0; this.smoothing = 0.07; }
+    follow(targetX, targetY) {
+        this.x += (targetX - canvas.width / 2 - this.x) * this.smoothing;
+        this.y += (targetY - canvas.height / 2 - this.y) * this.smoothing;
+    }
+}
+
+// Sistema Avançado de Spawn Seguro (Impede Árvores e Fora do Mapa)
+function findSafeSpawn(tileMap, occupied = []) {
+    let protectionCounter = 0;
+    while (protectionCounter < 2000) {
+        let r = Math.floor(Math.random() * (tileMap.rows - 2)) + 1;
+        let c = Math.floor(Math.random() * (tileMap.cols - 2)) + 1;
+       
+        if (tileMap.grid[r][c] === 0) {
+            let px = c * TILE_SIZE + TILE_SIZE / 2;
+            let py = r * TILE_SIZE + TILE_SIZE / 2;
+           
+            let distant = occupied.every(pos => Math.hypot(pos.x - px, pos.y - py) > 180);
+            if (distant || occupied.length === 0) {
+                return { x: px, y: py };
+            }
+        }
+        protectionCounter++;
+    }
+    return { x: 192, y: 192 };
+}
+
+let tileMap, player, camera, vehicles, javalis, activeEntity;
+let gameActive = false;
+let vehicleCooldown = 0;
+let matchTimer = 300; // 5 minutos em segundos
+let timerInterval;
+
+function initGameObjects() {
+    tileMap = new TileMap(MAP_GRID);
+    const spawns = [];
+
+    // Player inicia seguro no centro do mapa livre
+    player = new Player(12 * TILE_SIZE + 32, 11 * TILE_SIZE + 32);
+    spawns.push({x: player.x, y: player.y});
+    camera = new Camera();
+
+    // Esconder os três veículos em cantos espalhados e aleatórios
+    const policeSpawn = findSafeSpawn(tileMap, spawns); spawns.push(policeSpawn);
+    const vanSpawn = findSafeSpawn(tileMap, spawns); spawns.push(vanSpawn);
+    const motoSpawn = findSafeSpawn(tileMap, spawns); spawns.push(motoSpawn);
+
+    vehicles = [
+        new Vehicle(policeSpawn.x, policeSpawn.y, "police"),
+        new Vehicle(vanSpawn.x, vanSpawn.y, "van"),
+        new Vehicle(motoSpawn.x, motoSpawn.y, "moto")
+    ];
+
+    // Gerar 14 javalis distribuídos perfeitamente e distantes
+    javalis = [];
+    for (let i = 0; i < 14; i++) {
+        let jSpawn = findSafeSpawn(tileMap, spawns);
+        spawns.push(jSpawn);
+        javalis.push(new Javali(jSpawn.x, jSpawn.y));
+    }
+
+    activeEntity = player;
+}
+
+function startGame() {
+    document.getElementById("start-screen").style.display = "none";
+    document.getElementById("game-over-screen").style.display = "none";
+    document.getElementById("victory-screen").style.display = "none";
+    canvas.style.display = "block";
+    document.getElementById("hud").style.display = "block";
+   
+    initGameObjects();
+    gameActive = true;
+    matchTimer = 300;
+
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        if (!gameActive) return;
+        matchTimer--;
+        let mins = Math.floor(matchTimer / 60).toString().padStart(2, '0');
+        let secs = (matchTimer % 60).toString().padStart(2, '0');
+        document.getElementById("timer-display").innerText = `${mins}:${secs}`;
+
+        if (matchTimer <= 0) {
+            triggerGameOver("O tempo limite de 5 minutos expirou!");
+        }
+    }, 1000);
+
+    requestAnimationFrame(gameLoop);
+}
+
+function triggerGameOver(reason) {
+    gameActive = false;
+    clearInterval(timerInterval);
+    canvas.style.display = "none";
+    document.getElementById("hud").style.display = "none";
+    document.getElementById("game-over-reason").innerText = reason;
+    document.getElementById("game-over-screen").style.display = "block";
+}
+
+function triggerVictory() {
+    gameActive = false;
+    clearInterval(timerInterval);
+    canvas.style.display = "none";
+    document.getElementById("hud").style.display = "none";
+    document.getElementById("victory-screen").style.display = "block";
+}
+
+function restartGame() {
+    startGame();
+}
+
+function gameLoop() {
+    if (!gameActive) return;
+
+    if (vehicleCooldown > 0) vehicleCooldown--;
+
+    // Monitoramento Dinâmico do HUD
+    document.getElementById("hp-bar").style.width = player.health + "%";
+    document.getElementById("alvos-display").innerText = javalis.filter(j => !j.slipped).length;
+
+    let enteredVehicle = vehicles.find(v => v.driver !== null);
+    if (enteredVehicle) {
+        document.getElementById("v-hp-container").style.display = "block";
+        document.getElementById("v-hp-bar").style.width = enteredVehicle.health + "%";
+    } else {
+        document.getElementById("v-hp-container").style.display = "none";
+    }
+
+    // Controle de Entrada/Saída de Veículo
+    if (keys['f'] && vehicleCooldown === 0) {
+        vehicleCooldown = 20;
+        if (enteredVehicle) {
+            enteredVehicle.driver = null; player.isActive = true;
+            player.x = enteredVehicle.x + 46; player.y = enteredVehicle.y;
+            activeEntity = player;
+        } else {
+            let close = vehicles.find(v => v.health > 0 && Math.hypot(player.x - v.x, player.y - v.y) < 75);
+            if (close) { close.driver = player; player.isActive = false; activeEntity = close; }
+        }
+    }
+
+    player.update(tileMap);
+    vehicles.forEach(v => v.update(tileMap));
+   
+    // Javalis perseguem a entidade ativa diretamente (vêem o carro e atacam o carro)
+    javalis.forEach(j => j.update(tileMap, {x: activeEntity.x, y: activeEntity.y}));
+
+    // Interações e Ataques dos Javalis ativos
+    javalis.forEach(j => {
+        if (j.slipped) return;
+
+        let targetDist = Math.hypot(activeEntity.x - j.x, activeEntity.y - j.y);
+       
+        if (player.isActive) {
+            // Ataque ao Agente a pé
+            if (targetDist < player.radius + j.radius) {
+                player.health -= 0.7;
+                if (player.health <= 0) triggerGameOver("Sua integridade física acabou!");
+               
+                let push = Math.atan2(player.y - j.y, player.x - j.x);
+                if (!tileMap.isSolid(player.x + Math.cos(push)*6, player.y)) player.x += Math.cos(push)*6;
+                if (!tileMap.isSolid(player.x, player.y + Math.sin(push)*6)) player.y += Math.sin(push)*6;
+            }
+        } else if (enteredVehicle) {
+            // Ataque e Destruição do Veículo do Jogador
+            if (targetDist < 46) {
+                enteredVehicle.health -= 0.4;
+               
+                // Veículo Destruído
+                if (enteredVehicle.health <= 0) {
+                    enteredVehicle.driver = null; player.isActive = true;
+                    player.x = enteredVehicle.x + 50; player.y = enteredVehicle.y;
+                    activeEntity = player;
+                    player.health -= 25; // Penalidade extrema pela explosão/destruição
+                    if (player.health <= 0) triggerGameOver("Você ficou preso nos destroços do veículo destruído!");
+                }
+            }
+        }
+    });
+
+    // Impacto do Veículo derrubando os Javalis
+    vehicles.forEach(v => {
+        let speed = Math.hypot(v.vx, v.vy);
+        if (speed > 1.4) {
+            javalis.forEach(j => {
+                if (!j.slipped && Math.hypot(j.x - v.x, j.y - v.y) < 46) {
+                    j.slipAndSlide(v.vx * 1.5, v.vy * 1.5);
+                }
+            });
+        }
+    });
+
+    // Filtro de vitória (todos caídos)
+    if (javalis.every(j => j.slipped)) {
+        triggerVictory();
+    }
+
+    // Partículas do lançador d'água
+    for (let i = waterParticles.length - 1; i >= 0; i--) {
+        let wp = waterParticles[i]; wp.update(tileMap);
+        let hit = false;
+        for (let j of javalis) {
+            if (!j.slipped && Math.hypot(wp.x - j.x, wp.y - j.y) < j.radius + 4) {
+                j.slipAndSlide(wp.vx * 0.45, wp.vy * 0.45); hit = true; break;
+            }
+        }
+        if (wp.life <= 0 || hit) waterParticles.splice(i, 1);
+    }
+
+    camera.follow(activeEntity.x, activeEntity.y);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+   
+    tileMap.draw(ctx, camera);
+    javalis.forEach(j => j.draw(ctx, camera));
+    vehicles.forEach(v => { if (v.health > 0) v.draw(ctx, camera); });
+    player.draw(ctx, camera);
+    waterParticles.forEach(wp => wp.draw(ctx, camera));
+
+    requestAnimationFrame(gameLoop);
+}
+</script>
+
+</body>
+</html>
